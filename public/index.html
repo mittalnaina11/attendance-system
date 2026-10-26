@@ -1,0 +1,151 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Attendance Tracker</title>
+<link rel="manifest" href="/manifest.json"><meta name="theme-color" content="#0d6efd">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"></head>
+<body class="bg-light"><div id="app" class="container py-4"></div>
+<script>
+let tok,me,tab=0,flash='',rq={type:'weekly',subject:''};const $=i=>document.getElementById(i);
+const E=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+async function api(p,o={}){const r=await fetch('/api'+p,{method:o.method||'GET',headers:{'Content-Type':'application/json',Authorization:'Bearer '+tok},body:o.body&&JSON.stringify(o.body)});
+ if(!r.ok){const j=await r.json().catch(()=>({}));throw new Error(j.error||'Request failed ('+r.status+')')}return r}
+const J=async(p,o)=>(await api(p,o)).json();
+const badge=(p,t)=>`<span class="badge bg-${p>=85?'success':p>=t?'warning text-dark':'danger'}">${p>=85?'Safe':p>=t?'Warning':'Critical'}</span>`;
+const bg=s=>s=='Approved'||s=='Eligible'?'success':s=='Rejected'||s=='Not Eligible'?'danger':'warning text-dark';
+function login(){$('app').innerHTML=`<div class="card mx-auto" style="max-width:380px"><div class="card-body"><h4>Attendance Tracker</h4><p class="text-muted small">NMIMS MPSTME Shirpur. B.Tech Computer Engineering, Div A, Semester V</p>
+<input id="em" class="form-control my-2" placeholder="Email" value="student1@demo.in"><input id="pw" type="password" class="form-control mb-2" value="password123">
+<button class="btn btn-primary w-100" onclick="doLogin()">Sign in</button><p class="text-danger small mt-2">${E(flash)}</p></div></div>`}
+async function doLogin(){try{const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:$('em').value,password:$('pw').value})});
+ const j=await r.json();if(!r.ok)throw new Error(j.error);tok=j.token;me=j.user;tab=0;flash='';show()}catch(x){flash=x.message;login()}}
+const TABS={student:['Dashboard','Leave','Alerts'],parent:['Dashboard','Alerts'],faculty:['Mark attendance','Reports'],mentor:['Leave requests','Alerts','Reports'],hod:['Condonation','Alerts','Reports','Settings & audit']};
+const leaveList=l=>l.length?`<table class="table bg-white"><tr><th>Type</th><th>Dates</th><th>Status</th><th>Note</th></tr>${l.map(x=>`<tr><td>${x.type}</td><td>${x.from_date} to ${x.to_date}</td><td><span class="badge bg-${bg(x.status)}">${x.status}</span></td><td>${E(x.decision_note)}</td></tr>`).join('')}</table>`:'No requests yet.';
+const queue=async()=>(await J('/leaves')).map(x=>`<div class="card card-body mb-2"><b>${E(x.name)}</b> ${x.type}, ${x.from_date} to ${x.to_date}<br>${E(x.reason)}
+${x.status=='Pending'?`<div class="input-group mt-2"><input id="n${x.id}" class="form-control" placeholder="Reason (required to reject)"><button class="btn btn-success" onclick="decide(${x.id},true)">Approve</button><button class="btn btn-danger" onclick="decide(${x.id},false)">Reject</button></div>`:`<b>${x.status}</b> ${E(x.decision_note)}`}</div>`).join('')||'Nothing to review.';
+const VIEW={
+async Dashboard(){const d=await J('/summary');return`<h5>Exam eligibility: <span class="badge bg-${bg(d.eligibility=='Condoned'?'':d.eligibility)}">${d.eligibility}</span></h5><div class="row g-3">${d.subjects.map(s=>`<div class="col-md-4"><div class="card"><div class="card-body"><b>${s.code}</b> ${badge(s.pc,d.threshold)}<div class="fs-2">${s.pc}%</div><div class="progress mb-2"><div class="progress-bar" style="width:${s.pc}%"></div></div><small>${s.p} of ${s.c} classes. ${s.pc>=d.threshold?'You can miss '+s.skip+' more.':'Attend the next '+s.need+' to recover.'}</small><br><small class="text-muted">If you attend all remaining: ${s.projected}%</small></div></div></div>`).join('')}</div>`},
+async Leave(){return`<div class="card card-body mb-3"><div class="row g-2"><div class="col"><input type="date" id="lf" class="form-control"></div><div class="col"><input type="date" id="lt" class="form-control"></div>
+<div class="col"><select id="ly" class="form-select"><option>Medical</option><option>Personal</option><option>Emergency</option><option>Condonation</option></select></div></div>
+<input id="lr" class="form-control my-2" placeholder="Reason or document name"><button class="btn btn-primary" onclick="sendLeave()">Send request</button></div>${leaveList(await J('/leaves'))}`},
+async Alerts(){return(await J('/alerts')).map(x=>`<div class="border-start border-danger border-4 bg-white p-2 mb-2"><b>${E(x.name)}, ${x.code} ${x.percent}%</b><br>${E(x.message)}<br><small class="text-muted">${E(x.channel)}</small></div>`).join('')||'No alerts.'},
+async'Mark attendance'(){const[sub,stu]=await Promise.all([J('/subjects'),J('/students')]);
+ return`<div class="card card-body"><div class="row g-2 mb-2"><div class="col"><select id="ms" class="form-select">${sub.map(s=>`<option value="${s.id}">${s.code}</option>`).join('')}</select></div>
+<div class="col"><input type="date" id="md" class="form-control" value="${new Date().toISOString().slice(0,10)}"></div><div class="col"><select id="mp" class="form-select"><option value="1">09:00-10:00</option><option value="2">10:00-11:00</option><option value="3">11:00-12:00</option><option value="4">12:00-01:00</option><option value="6">02:00-03:00</option><option value="7">03:00-04:00</option><option value="8">04:00-05:00</option></select></div></div>
+${stu.map(x=>`<div class="d-flex justify-content-between border-bottom py-1">${E(x.name)}<select class="mk form-select form-select-sm w-auto" data-id="${x.id}"><option value="P">Present</option><option value="A">Absent</option><option value="L">Late</option></select></div>`).join('')}
+<button class="btn btn-primary mt-3" onclick="saveAtt()">Save attendance</button></div>`},
+async Reports(){const[sub,rows]=await Promise.all([J('/subjects'),J('/report?'+new URLSearchParams(rq))]);
+ return`<div class="row g-2 mb-2"><div class="col"><select class="form-select" onchange="rq.type=this.value;show()">${['daily','weekly','monthly','semester'].map(x=>`<option ${x==rq.type?'selected':''}>${x}</option>`).join('')}</select></div>
+<div class="col"><select class="form-select" onchange="rq.subject=this.value;show()"><option value="">All subjects</option>${sub.map(s=>`<option value="${s.id}" ${s.id==rq.subject?'selected':''}>${s.code}</option>`).join('')}</select></div>
+<div class="col-auto"><button class="btn btn-outline-primary" onclick="csv()">Download CSV</button></div></div>
+<table class="table bg-white"><tr><th>Student</th><th>Present</th><th>Held</th><th>Percent</th><th>Status</th><th>Parent notice</th></tr>${rows.map(r=>`<tr><td>${E(r.name)}</td><td>${r.present}</td><td>${r.held}</td><td>${r.percent}%</td><td><span class="badge bg-${bg(r.status)}">${r.status}</span></td><td>${r.parent_notice}</td></tr>`).join('')}</table>`},
+async'Settings & audit'(){const[t,a]=await Promise.all([J('/threshold'),J('/audit')]);
+ return`<div class="input-group mb-3" style="max-width:320px"><span class="input-group-text">Threshold %</span><input id="thi" type="number" class="form-control" value="${t.threshold}"><button class="btn btn-primary" onclick="setTh()">Apply</button></div>
+<table class="table bg-white"><tr><th>Time</th><th>By</th><th>Action</th></tr>${a.map(x=>`<tr><td>${x.created_at}</td><td>${E(x.name||'System')}</td><td>${E(x.action)}</td></tr>`).join('')}</table>`}};
+VIEW['Leave requests']=VIEW.Condonation=queue;
+async function show(){const t=TABS[me.role][tab];let body;try{body=await VIEW[t]()}catch(x){body=`<div class="alert alert-danger">${E(x.message)}</div>`}
+ $('app').innerHTML=`<div class="d-flex justify-content-between mb-3"><h4>Attendance Tracker <small class="text-muted">${E(me.name)} (${me.role})</small></h4><button class="btn btn-outline-secondary btn-sm" onclick="tok=null;login()">Sign out</button></div>
+<ul class="nav nav-tabs mb-3">${TABS[me.role].map((x,i)=>`<li class="nav-item"><a href="#" class="nav-link ${i==tab?'active':''}" onclick="tab=${i};flash='';show();return false">${x}</a></li>`).join('')}</ul>${flash?`<div class="alert alert-info">${E(flash)}</div>`:''}${body}`}
+async function act(f,ok){try{await f();flash=ok}catch(x){flash=x.message}show()}
+const sendLeave=()=>act(()=>api('/leaves',{method:'POST',body:{type:$('ly').value,from_date:$('lf').value,to_date:$('lt').value,reason:$('lr').value.trim()}}),'Request sent for review.');
+const decide=(id,approve)=>act(()=>api(`/leaves/${id}/decision`,{method:'POST',body:{approve,note:$('n'+id).value}}),approve?'Approved. Attendance recalculated.':'Rejected.');
+const setTh=()=>act(()=>api('/threshold',{method:'PUT',body:{threshold:$('thi').value}}),'Threshold updated.');
+async function saveAtt(){try{const marks={};document.querySelectorAll('.mk').forEach(x=>marks[x.dataset.id]=x.value);
+ const r=await J('/attendance',{method:'POST',body:{subject_id:$('ms').value,date:$('md').value,period:$('mp').value,marks}});flash=`Saved. ${r.alerts} alert(s) sent.`}catch(x){flash=x.message}show()}
+async function csv(){const b=await(await api('/report?'+new URLSearchParams({...rq,format:'csv'}))).blob(),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='report.csv';a.click()}
+// ---- v2 additions
+const _dash=VIEW.Dashboard;
+const shd=(d,n)=>{const x=new Date(d+'T00:00:00Z');x.setUTCDate(x.getUTCDate()+n);return x.toISOString().slice(0,10)};
+const MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];let CAL={};
+function dayInfo(d){const a=CAL[d]||[];$('dayinfo').innerHTML=`<b>${d}</b>: `+(a.length?a.map(x=>`${x.code} <span class="badge bg-${x.status=='A'?(x.ex?'warning text-dark':'danger'):x.status=='L'?'info':'success'}">${x.status=='A'?(x.ex?'Excused':'Absent'):x.status=='L'?'Late':'Present'}</span>`).join(' &nbsp; '):'no classes')}
+VIEW.Dashboard=async()=>{
+ const base=await _dash(),h=await J('/history'),today=new Date().toISOString().slice(0,10);CAL={};
+ h.forEach(x=>(CAL[x.date]??=[]).push(x));
+ let st=shd(today,-55);st=shd(st,-((new Date(st+'T00:00:00Z').getUTCDay()+6)%7));
+ let rows='';
+ for(let d=st;d<=today;d=shd(d,1)){
+  if(!new Date(d+'T00:00:00Z').getUTCDay())continue;
+  const a=CAL[d]||[],p=a.filter(x=>x.status!='A'||x.ex).length,bad=a.some(x=>x.status=='A'&&!x.ex),ex=a.some(x=>x.status=='A'),
+  c=!a.length?['#e9ecef','#6c757d']:bad?['#dc3545','#fff']:ex?['#ffc107','#000']:['#198754','#fff'],dd=+d.slice(8);
+  rows+=`<div onclick="dayInfo('${d}')" title="${d}" style="cursor:pointer;background:${c[0]};color:${c[1]};border-radius:6px;padding:4px;min-height:52px;font-size:12px;line-height:1.2;${d==today?'outline:2px solid #0d6efd;':''}">${dd==1||d==st?`<small>${MON[+d.slice(5,7)-1]}</small><br>`:''}<b>${dd}</b>${a.length?`<br>${p}/${a.length}`:''}</div>`}
+ const ds=[];for(let i=59;i>=0;i--)ds.push(shd(today,-i));
+ const bars=[7,6,5,4,3,2,1,0].map(w=>{const f=ds[59-w*7-6]||ds[0],t=ds[59-w*7],a=h.filter(x=>x.date>=f&&x.date<=t),p=a.filter(x=>x.status!='A'||x.ex).length,pc=a.length?Math.round(p/a.length*100):0;
+  return`<div class="flex-fill text-center"><div class="bg-primary text-white small" style="height:${Math.max(pc,10)}px">${pc}</div><small class="text-muted">${f.slice(8)}/${f.slice(5,7)}</small></div>`}).join('');
+ return base+`<div class="row g-3 mt-1"><div class="col-lg-7"><div class="card card-body"><h6>Attendance calendar</h6>
+<div style="display:grid;grid-template-columns:repeat(6,1fr);gap:4px;margin-bottom:4px">${['Mon','Tue','Wed','Thu','Fri','Sat'].map(x=>`<small class="text-muted text-center">${x}</small>`).join('')}</div>
+<div style="display:grid;grid-template-columns:repeat(6,1fr);gap:4px">${rows}</div>
+<div id="dayinfo" class="mt-2 small">Tap a date to see its subject-wise status.</div>
+<small class="text-muted">Under each date: periods attended / held. Green all attended, amber excused leave, red absent, grey no class, blue outline today.</small></div></div>
+<div class="col-lg-5"><div class="card card-body"><h6>Weekly trend</h6><div class="d-flex align-items-end gap-2">${bars}</div><small class="text-muted">Last 8 weeks, overall %, labelled with the week start (dd/mm)</small></div></div></div>`};
+VIEW.Corrections=async()=>{
+ const c=await J('/corrections');
+ if(me.role=='faculty')return c.map(x=>`<div class="card card-body mb-2"><b>${E(x.name)}</b> says present in ${x.code} on ${x.date}<br>${E(x.reason)}<br>
+${x.status=='Pending'?`<div class="input-group mt-2"><input id="cn${x.id}" class="form-control" placeholder="Reason (required to reject)"><button class="btn btn-success" onclick="corrDecide(${x.id},true)">Approve</button><button class="btn btn-danger" onclick="corrDecide(${x.id},false)">Reject</button></div>`:`<span class="badge bg-${bg(x.status)}">${x.status}</span> ${E(x.decision_note)}`}</div>`).join('')||'No correction requests.';
+ const h=await J('/history'),ab=h.filter(x=>x.status=='A'&&!x.ex).slice(-12).reverse();
+ return`<h6>Recent absences you can dispute</h6>`+(ab.map(x=>`<div class="input-group mb-2"><span class="input-group-text">${x.code} ${x.date}</span><input id="cr${x.sid}" class="form-control" placeholder="Why was this marked wrongly?"><button class="btn btn-outline-primary" onclick="dispute(${x.sid})">Dispute</button></div>`).join('')||'<p>No recent absences.</p>')
+ +`<h6 class="mt-3">My requests</h6>`+(c.map(x=>`<p>${x.code} ${x.date}: <span class="badge bg-${bg(x.status)}">${x.status}</span> ${E(x.decision_note)}</p>`).join('')||'None yet.')};
+VIEW.Students=async()=>{const r=await J('/risk');
+ return`<div class="tw" style="overflow-x:auto"><table class="table bg-white align-middle"><tr><th>Student</th><th>Overall</th><th>Risk</th><th>Lowest</th><th>Early warning</th><th>Escalation</th><th>Mentor notes</th></tr>
+${r.map(x=>`<tr><td>${E(x.name)}</td><td>${x.overall}%</td><td>${badge(x.overall,x.t)}</td><td>${x.low_code||'-'} ${x.low}%</td><td>${x.trending?'<span class="badge bg-warning text-dark">Trending down</span>':''}</td><td>${x.esc}</td>
+<td style="min-width:260px">${x.last_note?`<small>${E(x.last_note)} <span class="badge bg-${x.follow_up=='Open'?'warning text-dark':'success'}">${x.follow_up}</span>${x.follow_up=='Open'&&me.role=='mentor'?` <a href="#" onclick="noteDone(${x.note_id});return false">mark done</a>`:''}</small>`:''}
+${me.role=='mentor'?`<div class="input-group input-group-sm mt-1"><input id="nt${x.id}" class="form-control" placeholder="Meeting note"><button class="btn btn-outline-primary" onclick="addNote(${x.id})">Add</button></div>`:''}</td></tr>`).join('')}</table></div>`};
+VIEW.Reports=async()=>{const[sub,rows]=await Promise.all([J('/subjects'),J('/report?'+new URLSearchParams(rq))]);
+ return`<div class="row g-2 mb-2"><div class="col"><select class="form-select" onchange="rq.type=this.value;if(this.value=='custom'){rq.from=rq.from||new Date(Date.now()-2592e6).toISOString().slice(0,10);rq.to=rq.to||new Date().toISOString().slice(0,10)}show()">${['daily','weekly','monthly','semester','custom'].map(x=>`<option ${x==rq.type?'selected':''}>${x}</option>`).join('')}</select></div>
+${rq.type=='custom'?`<div class="col"><input type="date" class="form-control" value="${rq.from}" onchange="rq.from=this.value;show()"></div><div class="col"><input type="date" class="form-control" value="${rq.to}" onchange="rq.to=this.value;show()"></div>`:''}
+<div class="col"><select class="form-select" onchange="rq.subject=this.value;show()"><option value="">All subjects</option>${sub.map(s=>`<option value="${s.id}" ${s.id==rq.subject?'selected':''}>${s.code}</option>`).join('')}</select></div>
+<div class="col-auto"><button class="btn btn-outline-primary" onclick="csv()">Download CSV</button></div></div>
+<table class="table bg-white"><tr><th>Student</th><th>Present</th><th>Held</th><th>Percent</th><th>Status</th><th>Parent notice</th></tr>${rows.map(r=>`<tr><td>${E(r.name)}</td><td>${r.present}</td><td>${r.held}</td><td>${r.percent}%</td><td><span class="badge bg-${bg(r.status)}">${r.status}</span></td><td>${r.parent_notice}</td></tr>`).join('')}</table>`};
+const _set=VIEW['Settings & audit'];
+VIEW['Settings & audit']=async()=>`<div class="card card-body mb-3"><b>Bulk import students</b><small class="text-muted">One per line: name,email,mentor_id (optional). Default password: password123</small>
+<textarea id="imp" class="form-control my-2" rows="3"></textarea><button class="btn btn-outline-primary" style="width:160px" onclick="doImport()">Import</button></div>`+await _set();
+const dispute=sid=>act(()=>api('/corrections',{method:'POST',body:{session_id:sid,claimed:'P',reason:$('cr'+sid).value.trim()}}),'Request sent to faculty.');
+const corrDecide=(id,ok)=>act(()=>api(`/corrections/${id}/decision`,{method:'POST',body:{approve:ok,note:$('cn'+id).value}}),ok?'Approved. Attendance updated.':'Rejected.');
+const addNote=id=>act(()=>api('/notes',{method:'POST',body:{student_id:id,note:$('nt'+id).value}}),'Note saved.');
+const noteDone=id=>act(()=>api(`/notes/${id}/done`,{method:'POST'}),'Follow-up marked done.');
+async function doImport(){try{const r=await J('/import',{method:'POST',body:{csv:$('imp').value}});flash='Imported '+r.imported+' student(s).'}catch(x){flash=x.message}show()}
+TABS.student=['Dashboard','Leave','Corrections','Alerts'];TABS.faculty=['Mark attendance','Corrections','Reports'];
+TABS.mentor=['Students','Leave requests','Alerts','Reports'];TABS.hod=['Students','Condonation','Alerts','Reports','Settings & audit'];
+// ---- v3: QR check-in, account page
+const QC=new URLSearchParams(location.search).get('c');let QR=null;
+const PER=[[1,'09:00-10:00'],[2,'10:00-11:00'],[3,'11:00-12:00'],[4,'12:00-01:00'],[6,'02:00-03:00'],[7,'03:00-04:00'],[8,'04:00-05:00']].map(p=>`<option value="${p[0]}">${p[1]}</option>`).join('');
+VIEW['Check in']=async()=>`<div class="card card-body" style="max-width:420px"><h6>Class check-in</h6><p class="text-muted small">Scan the QR on the classroom screen, or type the 6-character code.</p>
+<input id="cc" class="form-control mb-2 font-monospace" placeholder="Code" value="${E(QC||'')}" style="text-transform:uppercase"><button class="btn btn-primary" onclick="checkin()">Mark me present</button></div>`;
+async function checkin(){try{const r=await J('/checkin',{method:'POST',body:{code:$('cc').value.trim()}});flash='Checked in: '+r.subject+', period '+r.period+'.'}catch(x){flash=x.message}show()}
+const qrHtml=()=>`<div class="card card-body text-center"><img src="${QR.img}" style="max-width:260px;margin:auto" alt="QR code"><h2 class="font-monospace">${QR.code}</h2>
+<div id="cd" class="text-muted"></div><div id="qc" class="fw-bold"></div></div>`;
+VIEW['Live QR']=async()=>{const sub=await J('/subjects');
+ return`<div class="card card-body mb-3"><div class="row g-2"><div class="col"><select id="qs" class="form-select">${sub.map(s=>`<option value="${s.id}">${s.code}</option>`).join('')}</select></div>
+<div class="col"><select id="qp" class="form-select">${PER}</select></div><div class="col-auto"><button class="btn btn-primary" onclick="startQR()">Start check-in (2 min)</button></div></div>
+${location.hostname=='localhost'?'<p class="text-warning small mt-2 mb-0">Open this page using your PC Wi-Fi IP (for example http://192.168.1.5:3000) so student phones can reach it.</p>':''}</div>${QR?qrHtml():''}`};
+async function startQR(){try{QR=await J('/qr/start',{method:'POST',body:{subject_id:$('qs').value,period:$('qp').value}});clearInterval(window.qt);let k=0;
+ window.qt=setInterval(()=>{const c=$('cd');if(!c){clearInterval(window.qt);return}const l=Math.max(0,Math.round((QR.exp-Date.now())/1000));c.textContent=l?'Valid for '+l+' seconds':'Expired. Start again.';if(k++%5==0)qrStatus()},1000);flash=''}catch(x){flash=x.message}show()}
+async function qrStatus(){try{const r=await J('/qr/status/'+QR.code),e=$('qc');if(e)e.textContent=r.present+' of '+r.total+' students present'}catch(x){}}
+VIEW.Account=async()=>`<div class="card card-body" style="max-width:380px"><h6>Change password</h6><input id="op" type="password" class="form-control mb-2" placeholder="Current password">
+<input id="np" type="password" class="form-control mb-2" placeholder="New password (8+ characters)"><button class="btn btn-primary" onclick="chPw()">Update password</button></div>`;
+const chPw=()=>act(()=>api('/password',{method:'POST',body:{old:$('op').value,new:$('np').value}}),'Password updated.');
+TABS.student=['Dashboard','Check in','Leave','Corrections','Alerts'];TABS.faculty=['Mark attendance','Live QR','Corrections','Reports'];
+Object.keys(TABS).forEach(r=>TABS[r].push('Account'));
+const _dl=doLogin;doLogin=async function(){await _dl();if(tok&&QC&&me.role=='student'){tab=TABS.student.indexOf('Check in');show()}};
+// ---- v4: Recovery Planner with what-if simulator (student, parent) and Absence Insights heatmap (faculty, mentor, HOD)
+let PL=null;
+VIEW.Planner=async()=>{const d=await J('/summary'),T=d.threshold;PL=d;
+ const rows=d.subjects.map((s,j)=>{const rem=s.total-s.c,req=Math.max(0,Math.ceil(T/100*s.total-s.p)),miss=Math.max(0,rem-req),max=Math.round((s.p+rem)/s.total*1000)/10,wk=Math.max(1,Math.ceil(rem/6));
+  const st=req>rem?['Not reachable','danger']:req==0?['Safe','success']:req>rem*.85?['Tight','warning text-dark']:['On track','primary'];
+  return`<div class="card card-body mb-2"><div class="d-flex justify-content-between"><b>${s.code}</b><span class="badge bg-${st[1]}">${st[0]}</span></div>
+<small class="text-muted">${s.p} attended of ${s.c} held. ${rem} classes remain this term.</small>
+${req>rem?`<div>Even attending every remaining class you can reach only ${max}%. Apply for condonation or speak to your mentor.</div>`:`<div>Attend at least <b>${req}</b> of the remaining ${rem} (about <b>${Math.ceil(req/wk)}</b> a week). You can still miss <b>${miss}</b>.</div>`}
+<div class="mt-2 small">What if I miss the next <b id="mv${j}">0</b> classes? Final: <b id="mf${j}">${max}%</b> <span id="mt${j}"></span></div>
+<input type="range" class="form-range" min="0" max="${rem}" value="0" oninput="sim(${j},this.value)"></div>`}).join('');
+ return`<p class="text-muted">Plan to the end of term, not just today. Drag a slider to see what skipping classes does to your final percentage (eligibility needs ${T}%).</p>${rows}`};
+function sim(j,v){const s=PL.subjects[j],rem=s.total-s.c,f=Math.round((s.p+rem-v)/s.total*1000)/10;
+ $('mv'+j).textContent=v;$('mf'+j).textContent=f+'%';$('mt'+j).innerHTML=f>=PL.threshold?'<span class="badge bg-success">Eligible</span>':'<span class="badge bg-danger">Short</span>'}
+VIEW.Insights=async()=>{const d=await J('/insights'),D=['Mon','Tue','Wed','Thu','Fri'],P=[1,2,3,4,6,7,8],LB={1:'09:00',2:'10:00',3:'11:00',4:'12:00',6:'02:00',7:'03:00',8:'04:00'},cell={},by={};
+ d.forEach(x=>{by[x.code]??={a:0,t:0};by[x.code].a+=x.absent;by[x.code].t+=x.total;if(x.dow>4)return;const k=x.dow+'-'+x.period;cell[k]??={a:0,t:0};cell[k].a+=x.absent;cell[k].t+=x.total});
+ let best=null;for(const k in cell){const r=cell[k].a/cell[k].t;if(!best||r>best.r)best={k,r}}
+ const [bd,bp]=best?best.k.split('-'):[0,0];
+ const grid=P.map(p=>`<tr><th>${LB[p]}</th>${D.map((_,i)=>{const v=cell[i+'-'+p];return v?`<td class="text-center" style="background:rgba(220,53,69,${Math.min(.12+v.a/v.t*2.2,1)})" title="${v.a} of ${v.t} entries absent">${Math.round(v.a/v.t*100)}%</td>`:'<td class="text-center text-muted">-</td>'}).join('')}</tr>`).join('');
+ return`<div class="alert alert-info">${best?`Highest absenteeism: <b>${D[bd]} at ${LB[bp]}</b> (${Math.round(best.r*100)}% of entries absent). That slot may need a reminder, a QR check-in or a schedule change.`:'No attendance data yet.'}</div>
+<div class="row g-3"><div class="col-lg-7"><table class="table table-bordered bg-white mb-1"><tr><th>Slot</th>${D.map(x=>`<th class="text-center">${x}</th>`).join('')}</tr>${grid}</table>
+<small class="text-muted">Each cell: share of student entries marked absent in that weekday and time slot. Darker means more absences.</small></div>
+<div class="col-lg-5"><table class="table bg-white"><tr><th>Subject</th><th>Absence rate</th></tr>${Object.entries(by).sort((a,b)=>b[1].a/b[1].t-a[1].a/a[1].t).map(([c,v])=>`<tr><td>${c}</td><td>${Math.round(v.a/v.t*100)}%</td></tr>`).join('')}</table></div></div>`};
+const ins=(r,n)=>TABS[r].splice(TABS[r].length-1,0,n);
+['student','parent'].forEach(r=>ins(r,'Planner'));['faculty','mentor','hod'].forEach(r=>ins(r,'Insights'));
+login();
+</script></body></html>
